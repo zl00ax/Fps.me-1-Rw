@@ -12,13 +12,12 @@ def send_telegram(message: str, photo_path: str | None = None):
     base_url = f"https://api.telegram.org/bot{token}"
     try:
         if photo_path and os.path.exists(photo_path):
-            caption = message[:1000]
             with open(photo_path, "rb") as img:
                 resp = requests.post(
                     f"{base_url}/sendPhoto",
                     data={
                         "chat_id": chat_id,
-                        "caption": caption,
+                        "caption": message[:1000],
                         "parse_mode": "HTML",
                     },
                     files={"photo": img},
