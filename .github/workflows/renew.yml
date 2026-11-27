@@ -1,0 +1,52 @@
+name: FPS.ms Auto Renew
+
+on:
+  schedule:
+    # 每天两次非整点执行（UTC 02:17 & 14:29 => 北京时间 10:17 & 22:29）
+    - cron: "17 2 * * *"
+    - cron: "29 14 * * *"
+  workflow_dispatch:
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies (xvfb & sing-box)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb curl tar
+          SINGBOX_VER="1.11.4"
+          curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VER}/sing-box-${SINGBOX_VER}-linux-amd64.tar.gz" -o /tmp/sing-box.tar.gz
+          tar -xzf /tmp/sing-box.tar.gz -C /tmp
+          sudo mv /tmp/sing-box-${SINGBOX_VER}-linux-amd64/sing-box /usr/local/bin/sing-box
+          sudo chmod +x /usr/local/bin/sing-box
+          sing-box version
+
+      - name: Install Python dependencies & Patchright Chromium
+        run: |
+          pip install -r requirements.txt
+          patchright install chromium
+          patchright install-deps chromium
+
+      - name: Run FPS.ms Renew Script
+        env:
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+          FPS_COOKIES: ${{ secrets.FPS_COOKIES }}
+          FPS_EMAIL: ${{ secrets.FPS_EMAIL }}
+          FPS_PASSWORD: ${{ secrets.FPS_PASSWORD }}
+          FPS_SERVER_ID: ${{ secrets.FPS_SERVER_ID }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          SKIP_JITTER: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" python renew.py
