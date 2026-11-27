@@ -45,9 +45,8 @@ def _parse_vless(uri: str) -> dict:
         "uuid": unquote(parsed.username or ""),
     }
 
-    flow = params.get("flow")
-    if flow:
-        outbound["flow"] = flow
+    if params.get("flow"):
+        outbound["flow"] = params["flow"]
 
     security = params.get("security", "none").lower()
     if security in ("tls", "reality"):
@@ -56,12 +55,10 @@ def _parse_vless(uri: str) -> dict:
             "server_name": params.get("sni") or parsed.hostname,
             "insecure": params.get("allowInsecure", "0") in ("1", "true"),
         }
-        fp = params.get("fp")
-        if fp:
-            tls_cfg["utls"] = {"enabled": True, "fingerprint": fp}
-        alpn = params.get("alpn")
-        if alpn:
-            tls_cfg["alpn"] = [x.strip() for x in unquote(alpn).split(",") if x.strip()]
+        if params.get("fp"):
+            tls_cfg["utls"] = {"enabled": True, "fingerprint": params["fp"]}
+        if params.get("alpn"):
+            tls_cfg["alpn"] = [x.strip() for x in unquote(params["alpn"]).split(",") if x.strip()]
         if security == "reality":
             tls_cfg["reality"] = {
                 "enabled": True,
@@ -73,9 +70,8 @@ def _parse_vless(uri: str) -> dict:
     net_type = params.get("type", "tcp").lower()
     if net_type == "ws":
         ws_cfg = {"type": "ws", "path": unquote(params.get("path", "/"))}
-        host = params.get("host")
-        if host:
-            ws_cfg["headers"] = {"Host": host}
+        if params.get("host"):
+            ws_cfg["headers"] = {"Host": params["host"]}
         outbound["transport"] = ws_cfg
     elif net_type == "grpc":
         outbound["transport"] = {
@@ -148,10 +144,9 @@ def _parse_hysteria2(uri: str) -> dict:
         },
     }
 
-    obfs_type = params.get("obfs")
-    if obfs_type:
+    if params.get("obfs"):
         outbound["obfs"] = {
-            "type": obfs_type,
+            "type": params["obfs"],
             "password": unquote(params.get("obfs-password", "")),
         }
 
@@ -227,7 +222,8 @@ class SingBoxManager:
         self.proc = None
         self.config_path = None
 
-    def start(self) -> str:
+    def start(self) -> dict:
+        """启动 sing-box 并返回出口 IP 与地理时区信息。"""
         outbound = parse_proxy_uri(self.proxy_uri)
         config = {
             "log": {"level": "warn"},
@@ -253,21 +249,43 @@ class SingBoxManager:
         )
         atexit.register(self.stop)
 
-        # 等待代理端口就绪并校验出口 IP
         proxies = {
             "http": f"http://127.0.0.1:{self.local_port}",
             "https": f"http://127.0.0.1:{self.local_port}",
         }
+
         for _ in range(12):
             if self.proc.poll() is not None:
                 err = self.proc.stderr.read().decode("utf-8", errors="ignore")
                 raise RuntimeError(f"sing-box 启动失败: {err[:300]}")
+
+            # 优先获取 IP + 时区 + 国家
+            try:
+                resp = requests.get("https://ipwho.is/", proxies=proxies, timeout=8)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success") and data.get("ip"):
+                        info = {
+                            "ip": data["ip"],
+                            "country": data.get("country_code", "??"),
+                            "timezone": (data.get("timezone") or {}).get("id") or "Europe/Amsterdam",
+                        }
+                        print(f"[sing-box] 就绪 | IP: {info['ip']} ({info['country']}) | 时区: {info['timezone']}")
+                        return info
+            except Exception:
+                pass
+
+            # 备用接口仅获取 IP
             try:
                 resp = requests.get("https://api.ipify.org?format=json", proxies=proxies, timeout=8)
-                if resp.status_code == 200:
-                    ip = resp.json().get("ip", "unknown")
-                    print(f"[sing-box] 代理已就绪，当前出口 IP: {ip}")
-                    return ip
+                if resp.status_code == 200 and resp.json().get("ip"):
+                    info = {
+                        "ip": resp.json()["ip"],
+                        "country": "??",
+                        "timezone": "Europe/Amsterdam",
+                    }
+                    print(f"[sing-box] 就绪 | IP: {info['ip']} (默认时区)")
+                    return info
             except Exception:
                 time.sleep(1.5)
 
@@ -280,8 +298,11 @@ class SingBoxManager:
                 self.proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
+        self.proc = None
+
         if self.config_path and os.path.exists(self.config_path):
             try:
                 os.remove(self.config_path)
             except OSError:
                 pass
+        self.config_path = None
