@@ -1,4 +1,4 @@
-name: FPS.ms Auto Renew
+name: FPS.ms Multi-Account Auto Renew
 
 on:
   schedule:
@@ -6,11 +6,18 @@ on:
     - cron: "17 2 * * *"
     - cron: "29 14 * * *"
   workflow_dispatch:
+    inputs:
+      skip_jitter:
+        description: "手动测试时跳过长随机等待（true=快速执行，false=完整防风控间隔）"
+        required: false
+        default: "true"
+        type: boolean
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 账号较多时请按需调大超时时间（最大 360 分钟）
+    timeout-minutes: 50
 
     steps:
       - name: Checkout repository
@@ -38,15 +45,14 @@ jobs:
           patchright install chromium
           patchright install-deps chromium
 
-      - name: Run FPS.ms Renew Script
+      - name: Run Multi-Account Renew Script
         env:
-          PROXY_URL: ${{ secrets.PROXY_URL }}
-          FPS_COOKIES: ${{ secrets.FPS_COOKIES }}
-          FPS_EMAIL: ${{ secrets.FPS_EMAIL }}
-          FPS_PASSWORD: ${{ secrets.FPS_PASSWORD }}
-          FPS_SERVER_ID: ${{ secrets.FPS_SERVER_ID }}
+          FPS_ACCOUNTS: ${{ secrets.FPS_ACCOUNTS }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          SKIP_JITTER: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+          # 账号之间随机间隔秒数（默认 120~360 秒，即 2~6 分钟）
+          ACCOUNT_GAP_MIN: "120"
+          ACCOUNT_GAP_MAX: "360"
+          SKIP_JITTER: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_jitter || 'false' }}
         run: |
-          xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" python renew.py
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python renew.py
